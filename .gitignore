@@ -20,5 +20,6 @@ __pycache__/
 # Ignore output files
 Output_xlsx/
 
-# Allow all other files
-!*
+
+
+

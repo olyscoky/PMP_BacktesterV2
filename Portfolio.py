@@ -142,6 +142,26 @@ class InvesmentUniverse:
         return [asset.get_name() for asset in self.__assets if asset.is_ccy_hedge()]
 
     @staticmethod
+    def __to_pd_timestamp(index: str | pd.Timestamp) -> pd.Timestamp:
+        if isinstance(index, pd.Timestamp):
+            return index
+        else:
+            try:
+                return pd.Timestamp(index)
+            except ValueError:
+                raise Warning(f"index: {index} does not have valid format: srt('YYYY-mm-dd')")
+
+    def set_start_index(self, index: str | pd.Timestamp):
+        pd_index = self.__to_pd_timestamp(index=index)
+        if pd_index > self.__index_start:
+            self.__index_start = pd_index
+
+    def set_end_index(self, index: str | pd.Timestamp):
+        pd_index = self.__to_pd_timestamp(index=index)
+        if pd_index < self.__index_end:
+            self.__index_end = pd_index
+
+    @staticmethod
     def __convert_return_period(ret: pd.Series, period_d_current: int, period_d_new: int) -> pd.Series:
         return ((1 + ret) ** (period_d_new / period_d_current)) - 1
 

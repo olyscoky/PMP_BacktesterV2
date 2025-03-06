@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib import colormaps
-from matplotlib.figure import Figure
 import seaborn as sns
 import statsmodels.api as sm
 import os

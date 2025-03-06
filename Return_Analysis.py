@@ -94,30 +94,6 @@ class ReturnAnalyser:
                     bbox_inches="tight"
                 )
 
-    def analyse_returns(
-            self,
-            asset_names: list[str]
-    ):
-        df = self.__investment_universe.get_subset_asset_universe(subset_asset_names=asset_names)
-
-        stats_data = []
-        for asset, column in zip(asset_names, df.columns):
-            mean = df[column].mean()
-            std_dev = df[column].std()
-            neg_rets = df[column][df[column] < mean]
-            semi_std_dev = np.sqrt(np.mean((neg_rets - mean) ** 2) if len(neg_rets) > 0 else 0)
-            skewness = skew(df[column], nan_policy="omit")
-            kurt = kurtosis(df[column], nan_policy="omit")
-            geom_mean = np.exp(np.log1p(df[column]).mean()) - 1
-            var_95 = mean + norm.ppf(0.05) * std_dev
-            stats_data.append([asset, mean, geom_mean, std_dev, semi_std_dev, skewness, kurt, var_95])
-
-        headers = ["Asset", "Mean", "Geom-Mean", "Std Dev", "Semi Std Dev", "Skewness", "Kurtosis", "95%-VaR"]
-        print("\n")
-        print("Return Metrics")
-        print(tabulate(stats_data, headers=headers, tablefmt="fancy_grid", floatfmt=".4f"))
-        print("\n")
-
     def analyse_return_distribution(
             self,
             asset_names: list[str],

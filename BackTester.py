@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import colormaps
 from scipy.stats import skew, kurtosis
-from typing import Callable
+from typing import Callable, Tuple
 
 from Paths import Path
 from Strategy import StrategyFunction
@@ -94,12 +94,17 @@ class BackTester:
     def __cumulate_returns(ret: pd.Series) -> pd.Series:
         return np.expm1(np.log1p(ret).cumsum())
 
-    def __compute_metrics(self, returns: pd.Series):
+    def __compute_metrics(self, returns: pd.Series) -> Tuple[float]:
         freq_multiplier = self.__get_freq_multiplier(freq=self.__data_frequency)
 
-        rf = self.__rf_d[min(returns.index):max(returns.index)]
+        rf = ((1 + self.__rf_d[min(returns.index):max(returns.index)]) ** freq_multiplier) - 1
+        # risk-free now logic for frequencies other than daily
         avg_geom_excess_return = np.exp(np.log(1 + (returns - rf)).mean() * freq_multiplier) - 1
         avg_vol = np.std(returns) * np.sqrt(freq_multiplier)
+        avg_arithm_excess_return = np.mean(returns - rf)
+        neg_excess_rets = returns[returns < avg_arithm_excess_return]
+        avg_semi_vol = np.sqrt(np.mean((neg_excess_rets - avg_arithm_excess_return) ** 2)
+                               if len(neg_excess_rets) > 0 else 0)
         sharpe_ratio = avg_geom_excess_return / avg_vol     # Ziegler want geom sharpi
 
         cum_ret = (1 + returns).cumprod()
@@ -109,7 +114,7 @@ class BackTester:
         skewness = float(skew(returns.to_numpy(), bias=False))
         kurt = kurtosis(returns, bias=False)
 
-        return avg_geom_excess_return, avg_vol, sharpe_ratio, max_drawdown, skewness, kurt
+        return avg_geom_excess_return, avg_vol, avg_semi_vol, sharpe_ratio, max_drawdown, skewness, kurt
 
     @staticmethod
     def __get_freq_multiplier(freq: str | int) -> int:
@@ -473,8 +478,9 @@ class BackTester:
 
             strat_ret.loc[t] = asset_ret_t_cum + hedge_ret_t_cum - hedge_tc_t - rebalancing_tc_t - \
                                ccy_turnover_t.sum() * self.__ccy_exchg_c + \
-                               (1 - weights_new.sum()) * self.__rf_d[t]     # added risk free lending / borrowing if totalweights differ from 1
-                                                                            # changes in compute_metrics have been reverted
+                               (1 - weights_new.sum()) * (((1 + self.__rf_d[t]) ** freq_multiplier) - 1)
+            # added risk-free lending / borrowing if totalweights differ from 1
+            # changes in compute_metrics have been reverted
 
             weights_old = weights_new * (assets_ret_t + 1)
             weights_old = (weights_old / weights_old.sum()) * weights_new.sum()
@@ -537,7 +543,7 @@ class BackTester:
             bt_end_date: pd.Timestamp,
     ) -> 'BackTestRec':
 
-        avg_excess_return, avg_vol, sharpe_ratio, max_drawdown, skewness, kurt = self.__compute_metrics(
+        avg_excess_return, avg_vol, avg_semi_vol, sharpe_ratio, max_drawdown, skewness, kurt = self.__compute_metrics(
             returns=strat_ret,
             weights=strat_weights
         )
@@ -561,6 +567,7 @@ class BackTester:
             hedge_tc=hedge_tc,
             avg_excess_ret=avg_excess_return,
             avg_vol=avg_vol,
+            avg_semi_vol=avg_semi_vol,
             sharpe_ratio=sharpe_ratio,
             max_drawdown=max_drawdown,
             skewness=skewness,

@@ -30,6 +30,7 @@ class BackTestRec:
             hedge_tc: pd.Series,
             avg_excess_ret: float,
             avg_vol: float,
+            avg_semi_vol: float,
             sharpe_ratio: float,
             max_drawdown: float,
             skewness: float,
@@ -60,6 +61,7 @@ class BackTestRec:
 
         self.__avg_excess_ret = avg_excess_ret
         self.__avg_vol = avg_vol
+        self.__avg_semi_vol = avg_semi_vol
         self.__sharpe_ratio = sharpe_ratio
         self.__max_drawdown = max_drawdown
         self.__skewness = skewness
@@ -151,6 +153,9 @@ class BackTestRec:
     def get_avg_volatility(self) -> float:
         return self.__avg_vol
 
+    def get_avg_semi_volatility(self) -> float:
+        return self.__avg_semi_vol
+
     def get_sharpe_ratio(self) -> float:
         return self.__sharpe_ratio
 
@@ -196,6 +201,7 @@ class BackTestRec:
                 if self.__ccy_hedge_ratio is not None else "N/A"],
             ["Average Excess Return", f"{round(self.__avg_excess_ret * 100, 2)}%"],
             ["Average Volatility", f"{round(self.__avg_vol * 100, 2)}%"],
+            ["Average Semi-Volatility", f"{round(self.__avg_semi_vol * 100, 2)}%"],
             ["Sharpe Ratio", round(self.__sharpe_ratio, 4)],
             ["Max Drawdown", f"{round(self.__max_drawdown * 100, 2)}%"],
             ["Skewness", round(self.__skewness, 2)],
@@ -242,6 +248,7 @@ class BackTestRec:
             'hedge_tc': series_to_json(self.__hedge_tc),
             'avg_excess_ret': self.__avg_excess_ret,
             'avg_vol': self.__avg_vol,
+            "avg_semi_vol": self.__avg_semi_vol,
             'sharpe_ratio': self.__sharpe_ratio,
             'max_drawdown': self.__max_drawdown,
             'skewness': self.__skewness,
@@ -317,6 +324,7 @@ class BackTestRec:
                     "ccy_hedge_ratio": bt.get_ccy_hedge_ratio(),
                     "avg_excess_return": bt.get_avg_excess_returns(),
                     "avg_vol": bt.get_avg_volatility(),
+                    "avg_semi_vol": bt.get_avg_semi_volatility(),
                     "sharpe_ratio": bt.get_sharpe_ratio(),
                     "max_drawdown": bt.get_max_drawdown(),
                     "skewness": bt.get_skewness(),

@@ -20,6 +20,9 @@ __pycache__/
 # Ignore output files
 Output_xlsx/
 
-
+.gitignore
+.gitignore.save
+.DS_Store
+.idea
 
 

@@ -54,7 +54,7 @@ if __name__ == "__main__":
         show_regression_plot=True,
         save_regression_plot=False,
     )
-    ret_an.analyse_return_distribution(
+    ret_an.analyse_distribution(
         asset_names=["MSTR", "XBTUSD"],
         show_distribution_plot=True
     )

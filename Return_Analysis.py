@@ -9,6 +9,7 @@ import os
 from datetime import datetime
 from tabulate import tabulate
 from scipy.stats import skew, kurtosis, norm
+from typing import Callable
 
 from Portfolio import InvesmentUniverse
 from Paths import Path
@@ -44,12 +45,19 @@ class ReturnAnalyser:
             self,
             x_asset_names: list[str],
             y_asset_name: str,
+            x_operation: Callable[[pd.DataFrame], pd.DataFrame] = lambda df: df,
+            y_operation: Callable[[pd.Series], pd.Series] = lambda s: s,
             show_regression_plot: bool = False,
             save_regression_plot: bool = False
     ):
-        X = self.__investment_universe.get_subset_asset_universe(subset_asset_names=x_asset_names)
+        X = x_operation(
+            self.__investment_universe.get_subset_asset_universe(subset_asset_names=x_asset_names)
+        )
         X = sm.add_constant(X)
-        y = self.__investment_universe.get_subset_asset_universe(subset_asset_names=[y_asset_name])
+        y = y_operation(
+            self.__investment_universe.get_subset_asset_universe(subset_asset_names=[y_asset_name])
+            .squeeze()
+        )
         model = sm.OLS(y, X).fit()
         print("\n")
         print(model.summary())
@@ -86,13 +94,16 @@ class ReturnAnalyser:
                     bbox_inches="tight"
                 )
 
-    def analyse_return_distribution(
+    def analyse_distribution(
             self,
             asset_names: list[str],
+            operation: Callable[[pd.DataFrame], pd.DataFrame] = lambda df: df,
             show_distribution_plot: bool = False,
             save_distribution_plot: bool = False
     ):
-        df = self.__investment_universe.get_subset_asset_universe(subset_asset_names=asset_names)
+        df = operation(
+            self.__investment_universe.get_subset_asset_universe(subset_asset_names=asset_names)
+        )
 
         stats_data = []
         for asset, column in zip(asset_names, df.columns):

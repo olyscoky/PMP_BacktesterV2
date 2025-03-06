@@ -51,7 +51,7 @@ if __name__ == "__main__":
     ret_an.perform_OLS_regression(
         x_asset_names=["MSTR"],
         y_asset_name="XBTUSD",
-        show_regression_plot=False,
+        show_regression_plot=True,
         save_regression_plot=False,
     )
     ret_an.analyse_return_distribution(

@@ -51,6 +51,7 @@ class ReturnAnalyser:
         X = sm.add_constant(X)
         y = self.__investment_universe.get_subset_asset_universe(subset_asset_names=[y_asset_name])
         model = sm.OLS(y, X).fit()
+        print("\n")
         print(model.summary())
         print("\n")
 
@@ -106,7 +107,9 @@ class ReturnAnalyser:
             stats_data.append([asset, mean, geom_mean, std_dev, semi_std_dev, skewness, kurt, var_95])
 
         headers = ["Asset", "Mean", "Geom-Mean", "Std Dev", "Semi Std Dev", "Skewness", "Kurtosis", "95%-VaR"]
-        print(tabulate(stats_data, headers=headers, tablefmt="grid", floatfmt=".4f"))
+        print("\n")
+        print("Return Metrics")
+        print(tabulate(stats_data, headers=headers, tablefmt="fancy_grid", floatfmt=".4f"))
         print("\n")
 
         if show_distribution_plot or save_distribution_plot:

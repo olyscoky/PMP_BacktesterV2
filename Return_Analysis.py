@@ -98,9 +98,7 @@ class ReturnAnalyser:
             self,
             asset_names: list[str]
     ):
-        df = operation(
-            self.__investment_universe.get_subset_asset_universe(subset_asset_names=asset_names)
-        )
+        df = self.__investment_universe.get_subset_asset_universe(subset_asset_names=asset_names)
 
         stats_data = []
         for asset, column in zip(asset_names, df.columns):

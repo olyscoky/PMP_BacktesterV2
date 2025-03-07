@@ -4,8 +4,7 @@ import os
 class Path:
 
     __BASE_PATHS = [
-        "/Users/olivierscokaert/Desktop/BackTester",
-        "/Users/11pscokaert/Desktop/CH_Investor/"
+        "/Users/olivierscokaert/Desktop/BackTesterV2",
     ]
 
     @staticmethod

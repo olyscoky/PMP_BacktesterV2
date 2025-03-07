@@ -31,10 +31,14 @@ class BackTester:
             date_format: str = "%Y-%m-%d",
             trading_costs_bps: int = 0,
             ccy_exchg_costs_bps: int = 0,
-            trading_days_count: int = 252
+            trading_days_count: int = 252,
+            fill_nan: float | None = None,
+            drop_nan: bool = False,
     ):
+        self.__fill_nan = fill_nan
+        self.__drop_nan = drop_nan
         self.__investment_universe = investment_universe
-        self.__df = investment_universe.get_investable_return_df()
+        self.__df = investment_universe.get_investable_return_df(fill_nan=fill_nan, drop_nan=drop_nan)
         self.__rf_d = investment_universe.get_daily_rf()
         self.__rf_y = investment_universe.get_yearly_rf()
 
@@ -94,10 +98,11 @@ class BackTester:
     def __cumulate_returns(ret: pd.Series) -> pd.Series:
         return np.expm1(np.log1p(ret).cumsum())
 
-    def __compute_metrics(self, returns: pd.Series) -> Tuple[float]:
+    def __compute_metrics(self, returns: pd.Series) -> Tuple:
         freq_multiplier = self.__get_freq_multiplier(freq=self.__data_frequency)
 
-        rf = ((1 + self.__rf_d[min(returns.index):max(returns.index)]) ** freq_multiplier) - 1
+        rf = self.__rf_d.loc[self.__rf_d.index.intersection(returns.index)]
+        rf = ((1 + rf) ** freq_multiplier) - 1
         # risk-free now logic for frequencies other than daily
         avg_geom_excess_return = np.exp(np.log(1 + (returns - rf)).mean() * freq_multiplier) - 1
         avg_vol = np.std(returns) * np.sqrt(freq_multiplier)
@@ -157,8 +162,14 @@ class BackTester:
             columns=self.__df.columns,
             index=self.__df.index
         )
-        ccy_hedge_returns = self.__investment_universe.get_ccy_hedge_return_df()
-        ccy_returns = self.__investment_universe.get_ccy_return_df()
+        ccy_hedge_returns = self.__investment_universe.get_ccy_hedge_return_df(
+            fill_nan=self.__fill_nan,
+            drop_nan=self.__drop_nan
+        )
+        ccy_returns = self.__investment_universe.get_ccy_return_df(
+            fill_nan=self.__fill_nan,
+            drop_nan=self.__drop_nan
+        )
 
         for asset in self.__investment_universe.get_investable_asset_universe():
             if asset.get_ccy() == self.__main_ccy:
@@ -229,7 +240,10 @@ class BackTester:
         ):
             return self.__df
 
-        ccy_returns = self.__investment_universe.get_ccy_return_df()
+        ccy_returns = self.__investment_universe.get_ccy_return_df(
+            fill_nan=self.__fill_nan,
+            drop_nan=self.__drop_nan
+        )
 
         for asset in self.__investment_universe.get_investable_asset_universe():
             if asset.get_ccy() != self.__main_ccy:
@@ -544,8 +558,7 @@ class BackTester:
     ) -> 'BackTestRec':
 
         avg_excess_return, avg_vol, avg_semi_vol, sharpe_ratio, max_drawdown, skewness, kurt = self.__compute_metrics(
-            returns=strat_ret,
-            weights=strat_weights
+            returns=strat_ret
         )
 
         bt_rec = BackTestRec(

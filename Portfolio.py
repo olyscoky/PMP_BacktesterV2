@@ -71,6 +71,12 @@ class InvesmentUniverse:
         else:
             return df[self.__index_start:self.__index_end]
 
+    def __create_all_asset_df(self):
+        return pd.concat(
+            {asset.get_name(): asset.get_return_serie() for asset in self.__assets},
+            axis=1
+        )
+
     def get_subset_asset_universe(
             self,
             subset_asset_names: list[str],
@@ -78,13 +84,7 @@ class InvesmentUniverse:
             drop_nan: bool = False
     ) -> pd.DataFrame:
         if all(sa in self.get_all_assets_names() for sa in subset_asset_names):
-            df = pd.concat(
-                {
-                    asset.get_name(): asset.get_return_serie()
-                    for asset in self.__assets if asset.get_name() in subset_asset_names
-                },
-                axis=1
-            )
+            df = self.__create_all_asset_df()[subset_asset_names]
             return self.__process_df_nan(df=df, fill_nan=fill_nan, drop_nan=drop_nan)
         else:
             raise Warning(
@@ -97,13 +97,7 @@ class InvesmentUniverse:
         return [asset for asset in self.__assets if not asset.is_ccy_hedge()]
 
     def get_investable_return_df(self, fill_nan: float | None = None, drop_nan: bool = False) -> pd.DataFrame:
-        df = pd.concat(
-            {
-                asset.get_name(): asset.get_return_serie()
-                for asset in self.__assets if not asset.is_ccy_hedge()
-            },
-            axis=1
-        )
+        df = self.__create_all_asset_df()[[asset.get_name() for asset in self.__assets if not asset.is_ccy_hedge()]]
         return self.__process_df_nan(df=df, fill_nan=fill_nan, drop_nan=drop_nan)
 
     def get_investable_asset_names(self) -> list[str]:
@@ -113,13 +107,7 @@ class InvesmentUniverse:
         return self.__ccys
 
     def get_ccy_return_df(self, fill_nan: float | None = None, drop_nan: bool = False) -> pd.DataFrame:
-        df = pd.concat(
-            {
-                ccy.get_name(): ccy.get_return_serie()
-                for ccy in self.__ccys
-            },
-            axis=1
-        )
+        df = self.__create_all_asset_df()[[ccy.get_name() for ccy in self.__ccys]]
         return self.__process_df_nan(df=df, fill_nan=fill_nan, drop_nan=drop_nan)
 
     def get_ccy_names(self) -> list[str]:
@@ -129,13 +117,7 @@ class InvesmentUniverse:
         return [asset for asset in self.__assets if asset.is_ccy_hedge()]
 
     def get_ccy_hedge_return_df(self, fill_nan: float | None = None, drop_nan: bool = False) -> pd.DataFrame:
-        df = pd.concat(
-            {
-                asset.get_name(): asset.get_return_serie()
-                for asset in self.__assets if asset.is_ccy_hedge()
-            },
-            axis=1
-        )
+        df = self.__create_all_asset_df()[[asset.get_name() for asset in self.__assets if asset.is_ccy_hedge()]]
         return self.__process_df_nan(df=df, fill_nan=fill_nan, drop_nan=drop_nan)
 
     def get_ccy_hedge_names(self) -> list[str]:

@@ -1,9 +1,12 @@
 import pandas as pd
 
+from Utils import convert_return_period
+
 
 class InvesmentUniverse:
 
-    def __init__(self):
+    def __init__(self, main_ccy: str):
+        self.__main_ccy = main_ccy
         self.__assets = []
         self.__ccys = []
         self.__rf_daily = None
@@ -28,23 +31,13 @@ class InvesmentUniverse:
             raise Warning(f"asset with name: {asset_name} is already part of investment universe")
         del self.__assets[self.get_investable_asset_names().index(asset_name)]
 
-    def set_risk_free_rate(self, rf: 'Asset'):
+    def set_risk_free_rate(self, rf: 'Asset', period: int):
         self.__adjust_base_indices(asset=rf)
-
-        if rf.get_return_serie().abs().mean() >= 1e-3:
-            self.__rf_yearly = rf.get_return_serie()
-            self.__rf_daily = self.__convert_return_period(
-                ret=rf.get_return_serie(),
-                period_d_current=365,
-                period_d_new=1
-            )
-        else:
-            self.__rf_yearly = self.__convert_return_period(
-                ret=rf.get_return_serie(),
-                period_d_current=1,
-                period_d_new=365
-            )
-            self.__rf_daily = rf.get_return_serie()
+        ret = rf.get_return_serie()
+        self.__rf_daily = convert_return_period(ret=ret, period_d_current=period, period_d_new=1)
+        self.__rf_yearly = convert_return_period(ret=ret, period_d_current=period, period_d_new=365)
+        self.__rf_yearly = self.__rf_yearly.reindex(self.__create_all_asset_df().index, method="nearest")
+        self.__rf_daily = self.__rf_daily.reindex(self.__create_all_asset_df().index, method="nearest")
 
     def __adjust_base_indices(self, asset: 'Asset'):
         min_asset_index = asset.get_return_serie().index[0]
@@ -58,6 +51,15 @@ class InvesmentUniverse:
                 self.__index_start = min_asset_index
             if max_asset_index < self.__index_end:
                 self.__index_end = max_asset_index
+
+    def get_main_ccy(self) -> str:
+        return self.__main_ccy
+
+    def get_asset_from_name(self, name: str) -> 'Asset':
+        for asset in self.__assets:
+            if asset.get_name() == name:
+                return asset
+        raise Warning(f"asset: {name} is not part of the investment universe")
 
     def get_daily_rf(self) -> pd.Series:
         return self.__rf_daily[self.__index_start:self.__index_end]
@@ -118,7 +120,13 @@ class InvesmentUniverse:
         return self.__process_df_nan(df=df, fill_nan=fill_nan, drop_nan=drop_nan)
 
     def get_ccy_names(self) -> list[str]:
-        return [ccy.get_name() for ccy in self.__ccys]
+        return list(
+            set(
+                [ccy.get_name()[3:] for ccy in self.__ccys] +
+                [ccy.get_name()[:3] for ccy in self.__ccys] +
+                [self.__main_ccy]
+            )
+        )
 
     def get_ccy_hedge_universe(self):
         return [asset for asset in self.__assets if asset.is_ccy_hedge()]
@@ -150,10 +158,6 @@ class InvesmentUniverse:
         if pd_index < self.__index_end:
             self.__index_end = pd_index
 
-    @staticmethod
-    def __convert_return_period(ret: pd.Series, period_d_current: int, period_d_new: int) -> pd.Series:
-        return ((1 + ret) ** (period_d_new / period_d_current)) - 1
-
 
 class Asset:
 
@@ -164,7 +168,9 @@ class Asset:
             return_serie: pd.Series,
             ccy: str = None,
             hedge: bool = False,
-            annual_expense_ratio_bps: int = 0
+            annual_expense_ratio_bps: int = 0,
+            min_allocation: float | None = None,
+            max_allocation: float | None = None
     ):
         self.__name = name
         if asset_class.lower() not in [
@@ -177,6 +183,8 @@ class Asset:
         self.__annual_expense_ratio_bps = annual_expense_ratio_bps
         self.__return_serie = return_serie - ((self.__annual_expense_ratio_bps / 10_000) / 252)
         self.__return_serie = self.__return_serie.rename(self.__name)
+        self.__min_allocation = min_allocation
+        self.__max_allocation = max_allocation
 
     def get_name(self) -> str:
         return self.__name
@@ -190,8 +198,14 @@ class Asset:
     def get_return_serie(self) -> pd.Series:
         return self.__return_serie
 
-    def is_ccy_hedge(self):
+    def is_ccy_hedge(self) -> bool:
         return self.__hedge
 
-    def get_annual_expense_ratio_bps(self):
+    def get_annual_expense_ratio_bps(self) -> int:
         return self.__annual_expense_ratio_bps
+
+    def get_asset_min_allocation(self) -> float | None:
+        return self.__max_allocation
+
+    def get_asset_max_allocation(self) -> float | None:
+        return self.__max_allocation

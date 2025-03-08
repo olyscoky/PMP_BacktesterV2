@@ -42,3 +42,6 @@ def get_third_fridays(start_date: pd.Timestamp, end_date: pd.Timestamp) -> list[
 
     return third_fridays
 
+
+def convert_return_period(ret: pd.Series, period_d_current: int, period_d_new: int) -> pd.Series:
+    return ((1 + ret) ** (period_d_new / period_d_current)) - 1

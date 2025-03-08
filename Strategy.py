@@ -302,7 +302,6 @@ class Strategy:
     def __timing_function() -> StrategyFunction:
         def ts(
                 assets: pd.DataFrame,
-                timed_asset_allocation: float,
                 secondary_strategy: StrategyFunction,
                 previous_weights: pd.Series,
                 entry_time: pd.Timestamp | None,
@@ -321,9 +320,8 @@ class Strategy:
     # ------------------------------------------------------------------------------------------------------------------
     @staticmethod
     def xbt_carry_trade() -> StrategyFunction:
-        def ts(
+        def carry(
                 assets: pd.DataFrame,
-                timed_asset_allocation: float,
                 secondary_strategy: StrategyFunction,
                 complementary_data: pd.DataFrame,
                 previous_weights: pd.Series,
@@ -331,32 +329,33 @@ class Strategy:
                 rebalance: bool,
                 t: pd.Timestamp,
                 **kwargs
-        ) -> Tuple[pd.Timestamp, pd.Series]:
+        ) -> pd.Series:
             args = dict(locals())
             if rebalance and secondary_strategy is not None:
                 weights = secondary_strategy(**args)
             else:
                 next_third_friday = get_third_fridays(
                     start_date=t,
-                    end_date=t + pd.Timedelta(days=35)
+                    end_date=t + pd.Timedelta(days=60)
                 )[0]
                 if t == next_third_friday:
                     weights = previous_weights
                 else:
-                    xbt_spot = complementary_data[t, "XBT_SPOT"]
-                    future_spot = complementary_data[t, "MBR1_SPOT"]
+                    weights = pd.Series([0] * len(assets.columns), index=assets.columns)
+
+                    xbt_spot = complementary_data.loc[t, "XBT_SPOT"]
+                    future_spot = complementary_data.loc[t, "BMR1_SPOT"]
                     implied_rate = ((xbt_spot / future_spot) / (next_third_friday - t).days) * 365
 
                     implied_rate_threshold = 1.05
 
                     if implied_rate > implied_rate_threshold:
-                        weights = pd.Series([0] * len(assets.columns), index=assets.columns)
-                        weights["MBR1"] = -1
+                        weights["BMR1"] = -1
                         weights["BITO"] = 1
 
-            return entry_time, weights
+            return weights
 
-        return StrategyFunction(func=ts, name="tbd_name")
+        return StrategyFunction(func=carry, name="xbt_carry_trade")
 
 
 class StrategyHelpers:

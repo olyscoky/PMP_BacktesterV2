@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 import sys
+import numpy as np
 
 from BackTester import BackTester
 from DataAggregator import DataAggregator
@@ -49,7 +50,7 @@ if __name__ == "__main__":
         parse_dates=["DateTime"],
         index_col="DateTime"
     )
-    mstr_btc_investment.index = mstr_btc_investment.index.normalize()
+    mstr_btc_investment.index = mstr_btc_investment.index.date
 
     # __________________________________________________________________________________________________________________
 
@@ -86,7 +87,7 @@ if __name__ == "__main__":
     sofr_rf = Asset(
         name="SOFR",
         asset_class="interest_rate",
-        return_serie=sofr_data["PX_LAST"] / 100,
+        return_serie=(sofr_data["PX_LAST"] / 100),
         ccy=None,
         hedge=False,
     )
@@ -94,74 +95,77 @@ if __name__ == "__main__":
     # __________________________________________________________________________________________________________________
 
     # CREATING COMPLEMENTARY DATA ######################################################################################
-    complementatry_data = concat_df_series_with_nearest_index(
+    xbt_spot = xbt_data["PX_LAST"].rename("XBT_SPOT")
+    bmr1_spot = bmr1_data["PX_LAST"].rename("BMR1_SPOT")
+    complementary_data = concat_df_series_with_nearest_index(
         df_lst=[
-            bmr1_data["PX_LAST"],
-            bito_data["PX_LAST"]
-
-        ]
-    ).iloc[1:]
+            xbt_spot,
+            bmr1_spot
+        ],
+    )
     # __________________________________________________________________________________________________________________
 
     # INITIALIZING INVESTMENT UNIVERSE #################################################################################
-    invest_univ = InvesmentUniverse()
+    invest_univ = InvesmentUniverse(main_ccy="USD")
     invest_univ.add_asset(asset=mstr_asset)
     invest_univ.add_asset(asset=xbtusd_asset)
     invest_univ.add_asset(asset=bmr1_asset)
     invest_univ.add_asset(asset=bito_asset)
-    invest_univ.set_risk_free_rate(rf=sofr_rf)
+    invest_univ.set_risk_free_rate(rf=sofr_rf, period=365)
     # __________________________________________________________________________________________________________________
 
-    if False:
+    ret_an = DataAnalyser(investment_universe=invest_univ)
     # PERFORMING ANALYSIS ##############################################################################################
-        ret_an = DataAnalyser(investment_universe=invest_univ)
-        ret_an.perform_OLS_regression(
-            x_asset_names=["MSTR"],
-            y_asset_name="XBTUSD",
-            show_regression_plot=False,
-            save_regression_plot=False,
-        )
-
-        ret_an.perform_OLS_regression(
-            x_direct=concat_df_series_with_nearest_index(df_lst=[
-                xbtusd_asset.get_return_serie(),
-                mstr_btc_investment
-            ]),
-            y_asset_name="MSTR",
-            show_regression_plot=False
-        )
-
-        ret_an.single_plot(
-            x_series=mstr_btc_investment.index,
-            y_series=mstr_btc_investment,
-
-            line_plot=True,
-            save_plot=False
-        )
-
-        sys.exit()
-
-        ret_an.analyse_return_distribution(
-            asset_names=["MSTR", "XBTUSD"],
-            show_distribution_plot=True
-        )
+    # ret_an.perform_OLS_regression(
+    #     x_asset_names=["MSTR"],
+    #     y_asset_name="XBTUSD",
+    #     show_regression_plot=False,
+    #     save_regression_plot=False,
+    # )
+    # ret_an.perform_OLS_regression(
+    #     x_direct=concat_df_series_with_nearest_index(df_lst=[
+    #         xbtusd_asset.get_return_serie(),
+    #         mstr_btc_investment
+    #     ]),
+    #     y_asset_name="MSTR",
+    #     show_regression_plot=False
+    # )
+    #
+    # ret_an.single_plot(
+    #     x_series=mstr_btc_investment.index,
+    #     y_series=mstr_btc_investment,
+    #     line_plot=True,
+    #     save_plot=False
+    # )
+    #
+    # ret_an.analyse_return_distribution(
+    #     asset_names=["MSTR", "XBTUSD"],
+    #     show_distribution_plot=True
+    # )
     # __________________________________________________________________________________________________________________
+    # ret_an.single_plot(
+    #     x_series=bmr1_asset.get_return_serie().index,
+    #     y_series=np.expm1(np.log1p(bito_asset.get_return_serie()).cumsum()),
+    #     line_plot=True,
+    #     save_plot=False
+    # )
+    # sys.exit()
 
     if True:
         bt = BackTester(
             investment_universe=invest_univ,
-            main_ccy="USD",
             data_frequency="D",
             trading_costs_bps=5,
             ccy_exchg_costs_bps=10,
             trading_days_count=252,
+            drop_nan=True
         )
-        sys.exit()
+
         backtest = bt.backtest(
             strategy=Strategy.xbt_carry_trade(),
-            secondary_strategy=Strategy.no_rebalancing(),
             complementary_data=complementary_data,
             shorting_allowed=True,
+            constrained=False,
             bt_end_date="2024-10-01"
         )
         backtest.summarize()

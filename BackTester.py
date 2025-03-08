@@ -502,7 +502,7 @@ class BackTester:
                 window_start += offset
 
             period_perf = (weights_new * assets_ret_t).sum()
-            if period_perf < -0.8:     # there are no margins calls -> we go bankrot or not
+            if period_perf < -0.8:     # there are no margin calls -> we go bankrupt or not
                 raise Warning(
                     f"Portfolio lost {period_perf * 100}%\n" if period_perf <= -1
                     else f"margin call occured -> portfolio lost {period_perf * 100}%\n",

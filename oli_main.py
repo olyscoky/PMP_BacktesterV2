@@ -11,7 +11,7 @@ from Paths import Path
 from Portfolio import InvesmentUniverse, Asset
 from Return_Analysis import DataAnalyser
 
-from Utils import concat_df_series_with_nearest_index
+from Utils import concat_df_series_with_nearest_index, convert_return_period
 
 
 if __name__ == "__main__":
@@ -69,10 +69,13 @@ if __name__ == "__main__":
         ccy="USD",
         hedge=False
     )
+    rf_ret = convert_return_period(sofr_data["PX_LAST"] / 100, period_d_current=365, period_d_new=1)
+    bmr1_fut_ret = bmr1_data["PX_LAST"].pct_change().iloc[1:]
+    rf_ret = rf_ret.reindex(bmr1_fut_ret.index, method="nearest")
     bmr1_asset = Asset(
         name="BMR1",
         asset_class="future",
-        return_serie=bmr1_data["PX_LAST"].pct_change().iloc[1:],
+        return_serie=bmr1_fut_ret - rf_ret,
         ccy="USD",
         hedge=False
     )

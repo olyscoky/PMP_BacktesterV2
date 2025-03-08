@@ -524,7 +524,11 @@ class BackTester:
 
             strat_ret.loc[t] = asset_ret_t_cum + hedge_ret_t_cum - hedge_tc_t - rebalancing_tc_t - \
                                ccy_turnover_t.sum() * self.__ccy_exchg_c + \
-                               (1 - weights_new.sum()) * (((1 + self.__rf_d.loc[t]) ** freq_multiplier) - 1)
+                               (min(1 - weights_new.sum(), 0)) * (1 + convert_return_period(
+                                    ret=self.__rf_d.loc[[t]],
+                                    period_d_current=1,
+                                    period_d_new=self.__frequency_to_day(freq=self.__data_frequency)
+                               ).iat[0])
             # added risk-free lending / borrowing if totalweights differ from 1
             # changes in compute_metrics have been reverted
 

@@ -19,16 +19,15 @@ pd.set_option('display.max_rows', None)
 
 class BackTester:
 
+    # CONFIGURATIONS
     __valid_frequencies = ["D", "W", "M", "Q", "Y"]
+    __reindexation_complementary_data = None    # "nearest"
 
     def __init__(
             self,
             investment_universe: 'InvesmentUniverse',
-            start_date: str,
-            end_date: str,
             main_ccy: str,
             data_frequency: str,
-            date_format: str = "%Y-%m-%d",
             trading_costs_bps: int = 0,
             ccy_exchg_costs_bps: int = 0,
             trading_days_count: int = 252,
@@ -42,11 +41,8 @@ class BackTester:
         self.__rf_d = investment_universe.get_daily_rf()
         self.__rf_y = investment_universe.get_yearly_rf()
 
-        self.__start_date_str = start_date
-        self.__end_date_srt = end_date
-        self.__start_date = pd.to_datetime(start_date)
-        self.__end_date = pd.to_datetime(end_date)
-        self.__date_format = date_format
+        self.__start_date = self.__df.index[0]
+        self.__end_date = self.__df.index[-1]
 
         self.__main_ccy = main_ccy
         self.__data_frequency = data_frequency
@@ -351,9 +347,10 @@ class BackTester:
     def backtest(
             self,
             strategy: StrategyFunction,
-            rebalancing_freq: str | int,
-            shorting_allowed: bool = False,
             secondary_strategy: StrategyFunction | None = None,
+            rebalancing_freq: str | int | None = None,
+            complementary_data: pd.DataFrame | None = None,
+            shorting_allowed: bool = False,
             gap_days: int = 0,
             constrained: bool = True,
             rolling: bool = False,
@@ -370,9 +367,24 @@ class BackTester:
             if bt_end_date is not None else self.__end_date
         # --------------------------------------------------------------------------------------------------------------
 
+        # DATA VALIDATION ----------------------------------------------------------------------------------------------
+        if rebalancing_freq is None and secondary_strategy.name != "no_rebalancing":
+            raise Warning("provide rebalancing frequency of change to the 'no_rebalancing' secondary_strategy")
+        # --------------------------------------------------------------------------------------------------------------
+
         # VARIABLE INITIALIZATION --------------------------------------------------------------------------------------
         asset_ccy_hedge = self.__make_ccy_hedge(ccy_hedge_ratio=ccy_hedge_ratio)
         assets = self.__get_ccy_indepedent_returns()
+
+        if complementary_data is not None:
+            if self.__reindexation_complementary_data is not None:
+                complementary_data = complementary_data.reindex(
+                    assets.index,
+                    method=self.__reindexation_complementary_data
+                )
+            else:
+                if not complementary_data.index.equals(assets.index):
+                    raise Warning("index mismatch between complementary_data and assets")
 
         offset = self.__get_offset(rebalancing_freq=rebalancing_freq, gap_days=gap_days)
         window_start = assets.index.min()   # just to get a fixed anchor date point
@@ -416,6 +428,7 @@ class BackTester:
 
             strategy_params = {
                 "assets": assets_past_ret,
+                "complementary_data": complementary_data,
                 "rf": self.__rf_d[window_start:(t - offset if oos_backtest else t)],
                 "t": t,
                 "secondary_strategy": secondary_strategy,
@@ -599,9 +612,5 @@ class BackTester:
 if __name__ == "__main__":
     pass
 
-
-
 # TODO
-# - implement margin account for futures trading -> asset type flag Asset.get_asset_class() -> str
-# - implement margin account for options
 # - implement additional non tradeable information passing to backtesting.

@@ -5,6 +5,8 @@ import operator
 from typing import Tuple
 import inspect
 
+from Utils import get_third_fridays
+
 
 class StrategyFunction:
 
@@ -46,6 +48,12 @@ class Strategy:
         "==": operator.eq,
         "!=": operator.ne
     }
+
+    @staticmethod
+    def no_rebalancing() -> StrategyFunction:
+        def no_r(previous_weights: pd.Series, **kwargs):
+            return previous_weights
+        return StrategyFunction(func=no_r, name="no_rebalancing")
 
     @staticmethod
     def equally_weighted() -> StrategyFunction:
@@ -294,7 +302,6 @@ class Strategy:
     def __timing_function() -> StrategyFunction:
         def ts(
                 assets: pd.DataFrame,
-                global_df: pd.DataFrame,
                 timed_asset_allocation: float,
                 secondary_strategy: StrategyFunction,
                 previous_weights: pd.Series,
@@ -310,94 +317,46 @@ class Strategy:
                 weights = previous_weights
             return entry_time, weights
         return StrategyFunction(func=ts, name="tbd_name")
+
     # ------------------------------------------------------------------------------------------------------------------
-
     @staticmethod
-    def time_gold_with_vix() -> StrategyFunction:
-        def twg(
+    def xbt_carry_trade() -> StrategyFunction:
+        def ts(
                 assets: pd.DataFrame,
-                global_df: pd.DataFrame,
                 timed_asset_allocation: float,
                 secondary_strategy: StrategyFunction,
+                complementary_data: pd.DataFrame,
                 previous_weights: pd.Series,
                 entry_time: pd.Timestamp | None,
                 rebalance: bool,
                 t: pd.Timestamp,
                 **kwargs
-        ) -> Tuple[pd.Timestamp | None, pd.Series]:
-
+        ) -> Tuple[pd.Timestamp, pd.Series]:
             args = dict(locals())
-            args["assets"] = assets[[a for a in assets.columns if a != "RETURN_XAUUSD"]]
-
             if rebalance and secondary_strategy is not None:
                 weights = secondary_strategy(**args)
-                if (entry_time is not None) and ((t - entry_time).days <= 30):
-                    weights = weights * (1 - previous_weights["RETURN_XAUUSD"])
-                    weights["RETURN_XAUUSD"] = previous_weights["RETURN_XAUUSD"]
-                else:
-                    weights["RETURN_XAUUSD"] = 0
             else:
-                weights = previous_weights
+                next_third_friday = get_third_fridays(
+                    start_date=t,
+                    end_date=t + pd.Timedelta(days=35)
+                )[0]
+                if t == next_third_friday:
+                    weights = previous_weights
+                else:
+                    xbt_spot = complementary_data[t, "XBT_SPOT"]
+                    future_spot = complementary_data[t, "MBR1_SPOT"]
+                    implied_rate = ((xbt_spot / future_spot) / (next_third_friday - t).days) * 365
 
-            vix_last_val = global_df["PX_LAST_VIX"].loc[t]
-            if (vix_last_val > 40) and (entry_time is None or ((t - entry_time).days > 30)):
-                weight_gold = 0.90
-                weights = weights * (1 - weight_gold)
-                weights["RETURN_XAUUSD"] = weight_gold
-                entry_time = t
+                    implied_rate_threshold = 1.05
 
-            elif (entry_time is not None) and ((t - entry_time).days > 30):
-                weights = secondary_strategy(**args)
-                weights["RETURN_XAUUSD"] = 0
-                entry_time = None
+                    if implied_rate > implied_rate_threshold:
+                        weights = pd.Series([0] * len(assets.columns), index=assets.columns)
+                        weights["MBR1"] = -1
+                        weights["BITO"] = 1
 
             return entry_time, weights
 
-        return StrategyFunction(func=twg, name="time_gold_with_vix")
-
-    @staticmethod
-    def time_gold_with_cpi() -> StrategyFunction:
-        def twg(
-                assets: pd.DataFrame,
-                global_df: pd.DataFrame,
-                timed_asset_allocation: float,
-                secondary_strategy: StrategyFunction,
-                previous_weights: pd.Series,
-                entry_time: pd.Timestamp | None,
-                rebalance: bool,
-                t: pd.Timestamp,
-                **kwargs
-        ) -> Tuple[pd.Timestamp | None, pd.Series]:
-
-            args = dict(locals())
-            args["assets"] = assets[[a for a in assets.columns if a != "RETURN_XAUUSD"]]
-
-            if rebalance and secondary_strategy is not None:
-                weights = secondary_strategy(**args)
-                weights["RETURN_XAUUSD"] = 0
-                if (entry_time is not None) and ((t - entry_time).days <= 30):
-                    weights = weights * (1 - previous_weights["RETURN_XAUUSD"])
-                    weights["RETURN_XAUUSD"] = previous_weights["RETURN_XAUUSD"]
-                else:
-                    weights["RETURN_XAUUSD"] = 0
-            else:
-                weights = previous_weights
-
-            cpi_change_vs_last_month = global_df["M2M_INLFATION"].loc[t]
-            if (cpi_change_vs_last_month > 0.005) and ((entry_time is None) or (t - entry_time).days > 30):
-                weight_gold = 0.25
-                weights = weights * (1 - weight_gold)
-                weights["RETURN_XAUUSD"] = weight_gold
-                entry_time = t
-
-            elif (entry_time is not None) and ((t - entry_time).days > 30):
-                weights = secondary_strategy(**args)
-                weights["RETURN_XAUUSD"] = 0
-                entry_time = None
-
-            return entry_time, weights
-
-        return StrategyFunction(func=twg, name="time_gold_with_cpi")
+        return StrategyFunction(func=ts, name="tbd_name")
 
 
 class StrategyHelpers:

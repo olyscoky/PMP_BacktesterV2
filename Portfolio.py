@@ -16,17 +16,7 @@ class InvesmentUniverse:
         if asset.get_name() in self.get_all_assets_names():
             raise Warning("asset with same name already part of the investment universe")
 
-        min_asset_index = asset.get_return_serie().index[0]
-        max_asset_index = asset.get_return_serie().index[-1]
-
-        if self.__index_start is None:
-            self.__index_start = min_asset_index
-            self.__index_end = max_asset_index
-        else:
-            if min_asset_index > self.__index_start:
-                self.__index_start = min_asset_index
-            if max_asset_index < self.__index_end:
-                self.__index_end = max_asset_index
+        self.__adjust_base_indices(asset=asset)
 
         if asset.get_class() != "ccy":
             self.__assets.append(asset)
@@ -39,6 +29,8 @@ class InvesmentUniverse:
         del self.__assets[self.get_investable_asset_names().index(asset_name)]
 
     def set_risk_free_rate(self, rf: 'Asset'):
+        self.__adjust_base_indices(asset=rf)
+
         if rf.get_return_serie().abs().mean() >= 1e-3:
             self.__rf_yearly = rf.get_return_serie()
             self.__rf_daily = self.__convert_return_period(
@@ -54,6 +46,19 @@ class InvesmentUniverse:
             )
             self.__rf_daily = rf.get_return_serie()
 
+    def __adjust_base_indices(self, asset: 'Asset'):
+        min_asset_index = asset.get_return_serie().index[0]
+        max_asset_index = asset.get_return_serie().index[-1]
+
+        if self.__index_start is None:
+            self.__index_start = min_asset_index
+            self.__index_end = max_asset_index
+        else:
+            if min_asset_index > self.__index_start:
+                self.__index_start = min_asset_index
+            if max_asset_index < self.__index_end:
+                self.__index_end = max_asset_index
+
     def get_daily_rf(self) -> pd.Series:
         return self.__rf_daily[self.__index_start:self.__index_end]
 
@@ -64,6 +69,8 @@ class InvesmentUniverse:
         return [asset.get_name() for asset in self.__assets]
 
     def __process_df_nan(self, df: pd.DataFrame, fill_nan: float | None = None, drop_nan: bool = False) -> pd.DataFrame:
+        if all([fill_nan is not None, drop_nan is not None]):
+            raise Warning(f"fill_nan = {fill_nan} & drop_nan = {drop_nan} provided, please provide only either of")
         if fill_nan is not None:
             return df.fillna(fill_nan, inplace=True)[self.__index_start:self.__index_end]
         elif drop_nan:
@@ -150,14 +157,26 @@ class InvesmentUniverse:
 
 class Asset:
 
-    def __init__(self, name: str, asset_class: str, return_serie: pd.Series, ccy: str = None, hedge: bool = False):
+    def __init__(
+            self,
+            name: str,
+            asset_class: str,
+            return_serie: pd.Series,
+            ccy: str = None,
+            hedge: bool = False,
+            annual_expense_ratio_bps: int = 0
+    ):
         self.__name = name
-        if asset_class.lower() not in ["equity", "bond", "ccy", "future", "forward", "option", "crypto"]:
+        if asset_class.lower() not in [
+            "equity", "bond", "ccy", "future", "forward", "option", "crypto", "interest_rate"
+        ]:
             raise Exception(f"Asset type not supported: given type = {asset_class}")
         self.__asset_class = asset_class.lower()
         self.__ccy = ccy if asset_class != "ccy" else None
-        self.__return_serie = return_serie
         self.__hedge = hedge
+        self.__annual_expense_ratio_bps = annual_expense_ratio_bps
+        self.__return_serie = return_serie - ((self.__annual_expense_ratio_bps / 10_000) / 252)
+        self.__return_serie = self.__return_serie.rename(self.__name)
 
     def get_name(self) -> str:
         return self.__name
@@ -173,3 +192,6 @@ class Asset:
 
     def is_ccy_hedge(self):
         return self.__hedge
+
+    def get_annual_expense_ratio_bps(self):
+        return self.__annual_expense_ratio_bps

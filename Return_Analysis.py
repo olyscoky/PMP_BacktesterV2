@@ -12,9 +12,10 @@ from typing import Callable
 
 from Portfolio import InvesmentUniverse
 from Paths import Path
+from Utils import concat_df_series_with_nearest_index
 
 
-class ReturnAnalyser:
+class DataAnalyser:
 
     def __init__(
             self,
@@ -42,21 +43,64 @@ class ReturnAnalyser:
 
     def perform_OLS_regression(
             self,
-            x_asset_names: list[str],
-            y_asset_name: str,
+            x_asset_names: list[str] | None = None,
+            x_direct: pd.DataFrame | None = None,
+            y_asset_name: str | None = None,
+            y_direct: pd.Series | None = None,
             x_operation: Callable[[pd.DataFrame], pd.DataFrame] = lambda df: df,
             y_operation: Callable[[pd.Series], pd.Series] = lambda s: s,
             show_regression_plot: bool = False,
-            save_regression_plot: bool = False
+            save_regression_plot: bool = False,
+            fill_nan: float | None = None,
+            drop_nan: bool = False
     ):
-        X = x_operation(
-            self.__investment_universe.get_subset_asset_universe(subset_asset_names=x_asset_names)
-        )
+        if all([x_asset_names is None, x_direct is None]) or not any([x_asset_names is None, x_direct is None]):
+            raise Warning(
+                f"Only provide either x_asset_names or x_direct: "
+                f"{'Both provided' if all([x_asset_names, x_direct]) else 'None provided'}"
+            )
+        elif x_direct is not None:
+            X = x_direct
+        else:
+            X = x_operation(
+                self.__investment_universe.get_subset_asset_universe(
+                    subset_asset_names=x_asset_names,
+                    fill_nan=fill_nan,
+                    drop_nan=drop_nan
+                )
+            )
+
+        if all([y_asset_name is None, y_direct is None]) or not any([y_asset_name is None, y_direct is None]):
+            raise Warning(
+                f"Only provide either y_asset_name or y_direct: "
+                f"{'Both provided' if all([y_asset_name, y_direct]) else 'None provided'}"
+            )
+        elif y_direct is not None:
+            y = y_direct
+        else:
+            y = y_operation(
+                self.__investment_universe.get_subset_asset_universe(
+                    subset_asset_names=[y_asset_name],
+                    fill_nan=fill_nan,
+                    drop_nan=drop_nan
+                )
+                .squeeze()
+            )
+
+        if any([y_direct is None, x_direct is None]):
+            X_freq = X.index.to_series().diff().median()
+            y_freq = y.index.to_series().diff().median()
+            index_start = min(X.index[0], y.index[0])
+            index_end = max(X.index[-1], y.index[-1])
+            if X_freq < y_freq:
+                y = y.reindex(X.index, method="nearest")
+                X = X.loc[index_start:index_end]
+            else:
+                X = X.reindex(y.index, method="nearest")
+                y = y[index_start:index_end]
+
         X = sm.add_constant(X)
-        y = y_operation(
-            self.__investment_universe.get_subset_asset_universe(subset_asset_names=[y_asset_name])
-            .squeeze()
-        )
+
         model = sm.OLS(y, X).fit()
         print("\n")
         print(model.summary())
@@ -71,10 +115,14 @@ class ReturnAnalyser:
 
             for i, ax, in enumerate(axes):
                 X_var = X.iloc[:, i + 1]
-                y_pred = model.predict(X)
+                X_range = pd.Series(np.linspace(X_var.min(), X_var.max(), 100))
+                beta_0 = model.params[0]
+                beta_i = model.params[i + 1]
+                y_regression = beta_0 + beta_i * X_range
+
                 ax.scatter(X_var, y, alpha=0.5, label="Actual Data")
-                ax.plot(X_var, y_pred, color='red', label="Regression")
-                ax.set_xlabel(f"X_{i}: {x_asset_names[i]}")
+                ax.plot(X_range, y_regression, color='red', label="Regression", linewidth=2)
+                ax.set_xlabel(f"X_{i}: {x_asset_names[i] if x_asset_names is not None else x_direct.columns[i]}")
                 ax.set_ylabel(f"y: {y_asset_name}")
                 ax.legend()
 
@@ -97,9 +145,15 @@ class ReturnAnalyser:
             self,
             asset_names: list[str],
             show_distribution_plot: bool = False,
-            save_distribution_plot: bool = False
+            save_distribution_plot: bool = False,
+            fill_nan: float | None = None,
+            drop_nan: bool = False
     ):
-        df = self.__investment_universe.get_subset_asset_universe(subset_asset_names=asset_names)
+        df = self.__investment_universe.get_subset_asset_universe(
+            subset_asset_names=asset_names,
+            fill_nan=fill_nan,
+            drop_nan=drop_nan
+        )
 
         stats_data = []
         for asset, column in zip(asset_names, df.columns):
@@ -145,3 +199,50 @@ class ReturnAnalyser:
                     dpi=300,
                     bbox_inches="tight"
                 )
+
+    def single_plot(
+            self,
+            x_series: pd.Series,
+            y_series: pd.Series,
+            scatter_plot: bool = False,
+            line_plot: bool = False,
+            save_plot: bool = False
+    ):
+        df = concat_df_series_with_nearest_index(df_lst=[x_series, y_series])
+        plt.figure(figsize=(6, 4))
+        if scatter_plot and line_plot:
+            raise Warning("Plot must be either of type scatter or line not both")
+        elif scatter_plot:
+            plt.scatter(
+                df[str(x_series.columns[0]) if isinstance(x_series, pd.DataFrame) else str(x_series.name)],
+                df[str(y_series.columns[0]) if isinstance(y_series, pd.DataFrame) else str(y_series.name)],
+                label="Data",
+                alpha=0.7
+            )
+        elif line_plot:
+            plt.plot(
+                df[str(x_series.columns[0]) if isinstance(x_series, pd.DataFrame) else str(x_series.name)],
+                df[str(y_series.columns[0]) if isinstance(y_series, pd.DataFrame) else str(y_series.name)],
+                color=self.__plot_colors[0],
+            )
+        else:
+            raise Warning("Please provide a plot type: plot | line")
+
+        plt.xlabel("X-axis")
+        plt.ylabel("Y-axis")
+        plt.title(
+            f"{str(x_series.columns[0]) if isinstance(x_series, pd.DataFrame) else str(x_series.name)} vs "
+            f"{str(y_series.columns[0]) if isinstance(y_series, pd.DataFrame) else str(y_series.name)}"
+        )
+        plt.legend()
+        plt.show()
+
+        if save_plot:
+            plt.savefig(
+                os.path.join(
+                    Path.PLOT_PATH,
+                    f"SIMPLE_PLOT-{y_series.name}<>{x_series.name}-{datetime.now().strftime('%Y-%m-%d-%H-%M')}.png",
+                ),
+                dpi=300,
+                bbox_inches="tight"
+            )

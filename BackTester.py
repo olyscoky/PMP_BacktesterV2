@@ -6,11 +6,13 @@ import matplotlib.pyplot as plt
 from matplotlib import colormaps
 from scipy.stats import skew, kurtosis
 from typing import Callable, Tuple
+from tqdm import tqdm
 
 from Paths import Path
 from Strategy import StrategyFunction
 from BackTestRec import BackTestRec
 from Portfolio import InvesmentUniverse
+from Utils import convert_return_period
 
 
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -19,16 +21,14 @@ pd.set_option('display.max_rows', None)
 
 class BackTester:
 
+    # CONFIGURATIONS
     __valid_frequencies = ["D", "W", "M", "Q", "Y"]
+    __reindexation_complementary_data = "bfill"     # "nearest", None
 
     def __init__(
             self,
             investment_universe: 'InvesmentUniverse',
-            start_date: str,
-            end_date: str,
-            main_ccy: str,
             data_frequency: str,
-            date_format: str = "%Y-%m-%d",
             trading_costs_bps: int = 0,
             ccy_exchg_costs_bps: int = 0,
             trading_days_count: int = 252,
@@ -42,13 +42,10 @@ class BackTester:
         self.__rf_d = investment_universe.get_daily_rf()
         self.__rf_y = investment_universe.get_yearly_rf()
 
-        self.__start_date_str = start_date
-        self.__end_date_srt = end_date
-        self.__start_date = pd.to_datetime(start_date)
-        self.__end_date = pd.to_datetime(end_date)
-        self.__date_format = date_format
+        self.__start_date = self.__df.index[0]
+        self.__end_date = self.__df.index[-1]
 
-        self.__main_ccy = main_ccy
+        self.__main_ccy = self.__investment_universe.get_main_ccy()
         self.__data_frequency = data_frequency
 
         self.__tc = trading_costs_bps / 10_000
@@ -102,7 +99,11 @@ class BackTester:
         freq_multiplier = self.__get_freq_multiplier(freq=self.__data_frequency)
 
         rf = self.__rf_d.loc[self.__rf_d.index.intersection(returns.index)]
-        rf = ((1 + rf) ** freq_multiplier) - 1
+        rf = convert_return_period(
+            ret=rf,
+            period_d_current=1,
+            period_d_new=self.__frequency_to_day(freq=self.__data_frequency)
+        )
         # risk-free now logic for frequencies other than daily
         avg_geom_excess_return = np.exp(np.log(1 + (returns - rf)).mean() * freq_multiplier) - 1
         avg_vol = np.std(returns) * np.sqrt(freq_multiplier)
@@ -135,6 +136,23 @@ class BackTester:
             return 52
         elif freq == "D":
             return 252
+        else:
+            raise ValueError(f"frequency: {freq} was not recognized")
+
+    @staticmethod
+    def __frequency_to_day(freq: str | int) -> int:
+        if isinstance(freq, int):
+            return freq
+        if freq == "Y":
+            return 365
+        elif freq == "Q":
+            return 91
+        elif freq == "M":
+            return 30
+        elif freq == "W":
+            return 7
+        elif freq == "D":
+            return 1
         else:
             raise ValueError(f"frequency: {freq} was not recognized")
 
@@ -351,9 +369,10 @@ class BackTester:
     def backtest(
             self,
             strategy: StrategyFunction,
-            rebalancing_freq: str | int,
-            shorting_allowed: bool = False,
             secondary_strategy: StrategyFunction | None = None,
+            rebalancing_freq: str | int = "D",
+            complementary_data: pd.DataFrame | None = None,
+            shorting_allowed: bool = False,
             gap_days: int = 0,
             constrained: bool = True,
             rolling: bool = False,
@@ -373,6 +392,17 @@ class BackTester:
         # VARIABLE INITIALIZATION --------------------------------------------------------------------------------------
         asset_ccy_hedge = self.__make_ccy_hedge(ccy_hedge_ratio=ccy_hedge_ratio)
         assets = self.__get_ccy_indepedent_returns()
+
+        if complementary_data is not None:
+            if self.__reindexation_complementary_data is not None:
+                complementary_data = complementary_data.reindex(
+                    assets.index,
+                    method=self.__reindexation_complementary_data
+                )
+                assert(complementary_data.index.equals(assets.index)), "indices are not equal"
+            else:
+                if not complementary_data.index.equals(assets.index):
+                    raise Warning("index mismatch between complementary_data and assets")
 
         offset = self.__get_offset(rebalancing_freq=rebalancing_freq, gap_days=gap_days)
         window_start = assets.index.min()   # just to get a fixed anchor date point
@@ -410,23 +440,23 @@ class BackTester:
         # --------------------------------------------------------------------------------------------------------------
 
         # BACKTEST FRAMEWORK -------------------------------------------------------------------------------------------
-        for t in self.__df[min(rebalancings.keys()):max(rebalancings.keys())].index:  # future margin account tracking needs to be implemented
+        for t in tqdm(self.__df[min(rebalancings.keys()):max(rebalancings.keys())].index):
 
             assets_past_ret = assets.loc[window_start:(t - offset if oos_backtest else t)]
 
             strategy_params = {
                 "assets": assets_past_ret,
+                "complementary_data": complementary_data,
                 "rf": self.__rf_d[window_start:(t - offset if oos_backtest else t)],
                 "t": t,
                 "secondary_strategy": secondary_strategy,
-                "timed_asset_allocation": {
-                    asset.get_name(): asset.get_timeable_invest_amount() if asset.is_timeable() else 0
-                    for asset in assets.columns
-                },
                 "gap_days": gap_days,
                 "previous_weights": weights_old,
                 "assets_alloc_bounds": {
-                    asset.get_name(): (asset.get_min_alloc(), asset.get_max_alloc()) for asset in assets.columns
+                    asset_name: (
+                        self.__investment_universe.get_asset_from_name(name=asset_name).get_asset_min_allocation(),
+                        self.__investment_universe.get_asset_from_name(name=asset_name).get_asset_max_allocation()
+                    ) for asset_name in assets.columns
                 },
                 "freq_multiplier": freq_multiplier,
                 "shorting_allowed": shorting_allowed,
@@ -466,7 +496,9 @@ class BackTester:
 
             ccy_change_t = 0
             ccy_turnover_t = pd.Series(dtype=np.float64)
-            for ccy, indices in weights_new.groupby(self.__investment_universe.get_ccy_names()).groups.items():
+            for ccy, indices in weights_new.groupby(
+                weights_new.index.map(lambda name: self.__investment_universe.get_asset_from_name(name).get_ccy())
+            ).groups.items():
                 if ccy != self.__main_ccy:
                     changes = weights_new.loc[indices] - weights_old.loc[indices]
                     ccy_change_t += changes.sum()
@@ -492,7 +524,7 @@ class BackTester:
 
             strat_ret.loc[t] = asset_ret_t_cum + hedge_ret_t_cum - hedge_tc_t - rebalancing_tc_t - \
                                ccy_turnover_t.sum() * self.__ccy_exchg_c + \
-                               (1 - weights_new.sum()) * (((1 + self.__rf_d[t]) ** freq_multiplier) - 1)
+                               (1 - weights_new.sum()) * (((1 + self.__rf_d.loc[t]) ** freq_multiplier) - 1)
             # added risk-free lending / borrowing if totalweights differ from 1
             # changes in compute_metrics have been reverted
 
@@ -533,6 +565,9 @@ class BackTester:
             bt_end_date=bt_ed,
         )
         # --------------------------------------------------------------------------------------------------------------
+
+        print(strat_weights)
+        print(strat_ret)
 
         return backtest_instance
 
@@ -599,9 +634,5 @@ class BackTester:
 if __name__ == "__main__":
     pass
 
-
-
 # TODO
-# - implement margin account for futures trading -> asset type flag Asset.get_asset_class() -> str
-# - implement margin account for options
 # - implement additional non tradeable information passing to backtesting.

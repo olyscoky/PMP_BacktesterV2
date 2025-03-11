@@ -2,9 +2,8 @@ import os
 
 
 class Path:
-
     __BASE_PATHS = [
-        "/Users/olivierscokaert/Desktop/BackTesterV2",
+        r"C:\PMP_BacktesterV2",
     ]
 
     @staticmethod

@@ -248,11 +248,11 @@ class DataAnalyser:
 
         plt.xlabel("X-axis")
         plt.ylabel("Y-axis")
-        #plt.title(
-        #    f"{x_name if x_series is not None else 'Date'} vs "
-        #    f"{y_name}"
-        #)
-        #plt.legend()
+        plt.title(
+            f"{x_name if x_series is not None else 'Date'} vs "
+            f"{y_name}"
+        )
+        plt.legend()
 
         if save_plot:
             plt.savefig(

@@ -5,7 +5,7 @@ import operator
 from typing import Tuple
 import inspect
 
-from Utils import get_third_fridays
+from Utils import get_monthly_settlement_dates, get_last_friday_month
 
 
 class StrategyFunction:
@@ -329,31 +329,38 @@ class Strategy:
                 rebalance: bool,
                 t: pd.Timestamp,
                 **kwargs
-        ) -> pd.Series:
+        ) -> Tuple[pd.Timestamp, pd.Series]:
             args = dict(locals())
             if rebalance and secondary_strategy is not None:
                 weights = secondary_strategy(**args)
+
             else:
-                next_third_friday = get_third_fridays(
+                next_third_friday = get_last_friday_month(
                     start_date=t,
                     end_date=t + pd.Timedelta(days=60)
-                )[0]
+                )[0] + pd.Timedelta(days=28)
                 if t == next_third_friday:
                     weights = previous_weights
+
                 else:
-                    weights = pd.Series([0] * len(assets.columns), index=assets.columns)
+                    F = complementary_data.loc[t, "BMR1_SPOT"]
+                    S = complementary_data.loc[t, "XBT_SPOT"]
+                    implied_rate = ((np.log(F / S) / (next_third_friday - t).days) + 1) ** 365 - 1
 
-                    xbt_spot = complementary_data.loc[t, "XBT_SPOT"]
-                    future_spot = complementary_data.loc[t, "BMR1_SPOT"]
-                    implied_rate = ((xbt_spot / future_spot) / (next_third_friday - t).days) * 365
-
-                    implied_rate_threshold = 1.05
-
+                    implied_rate_threshold = 0.05
                     if implied_rate > implied_rate_threshold:
-                        weights["BMR1"] = -1
-                        weights["BITO"] = 1
+                        if entry_time is None:
+                            weights = pd.Series([0] * len(assets.columns), index=assets.columns)
+                            weights["S_BMR1"] = 0.5
+                            weights["IBIT"] = 0.5
+                            entry_time = t
+                        else:
+                            weights = previous_weights
+                    else:
+                        weights = pd.Series([0] * len(assets.columns), index=assets.columns)
+                        entry_time = None
 
-            return weights
+            return entry_time, weights
 
         return StrategyFunction(func=carry, name="xbt_carry_trade")
 

@@ -16,7 +16,6 @@ from Utils import convert_return_period
 
 
 warnings.filterwarnings("ignore", category=FutureWarning)
-pd.set_option('display.max_rows', None)
 
 
 class BackTester:
@@ -95,7 +94,7 @@ class BackTester:
     def __cumulate_returns(ret: pd.Series) -> pd.Series:
         return np.expm1(np.log1p(ret).cumsum())
 
-    def __compute_metrics(self, returns: pd.Series) -> Tuple:
+    def __compute_metrics(self, returns: pd.Series, long_short_strat) -> Tuple:
         freq_multiplier = self.__get_freq_multiplier(freq=self.__data_frequency)
 
         rf = self.__rf_d.loc[self.__rf_d.index.intersection(returns.index)]
@@ -105,7 +104,13 @@ class BackTester:
             period_d_new=self.__frequency_to_day(freq=self.__data_frequency)
         )
         # risk-free now logic for frequencies other than daily
-        avg_geom_excess_return = np.exp(np.log(1 + (returns - rf)).mean() * freq_multiplier) - 1
+        avg_geom_excess_return = np.expm1(
+            np.mean(
+                np.log(
+                    1 + (returns - (0 if long_short_strat else rf))
+                ) * freq_multiplier
+            )
+        )
         avg_vol = np.std(returns) * np.sqrt(freq_multiplier)
         avg_arithm_excess_return = np.mean(returns - rf)
         neg_excess_rets = returns[returns < avg_arithm_excess_return]
@@ -370,11 +375,12 @@ class BackTester:
             self,
             strategy: StrategyFunction,
             secondary_strategy: StrategyFunction | None = None,
+            long_short_strat: bool = False,
             rebalancing_freq: str | int = "D",
             complementary_data: pd.DataFrame | None = None,
             shorting_allowed: bool = False,
             gap_days: int = 0,
-            constrained: bool = True,
+            constrained: bool = False,   # set to True if weights should always sum to 100%
             rolling: bool = False,
             ccy_hedge_ratio: float | None = None,
             oos_backtest: bool = True,
@@ -522,18 +528,23 @@ class BackTester:
             hedge_ret_t_cum = (hedges_ret_t * weights_new).sum()
             hedge_ret.loc[t] = hedge_ret_t_cum
 
+            # added risk-free borrowing (not lending) if totalweights > 1
+            borrowing_costs = 0 if long_short_strat \
+                else min(1 - weights_new.sum(), 0) * (
+                    1 + convert_return_period(
+                        ret=self.__rf_d.loc[[t]],
+                        period_d_current=1,
+                        period_d_new=self.__frequency_to_day(freq=self.__data_frequency)
+                    )
+                ).iat[0]
+
             strat_ret.loc[t] = asset_ret_t_cum + hedge_ret_t_cum - hedge_tc_t - rebalancing_tc_t - \
-                               ccy_turnover_t.sum() * self.__ccy_exchg_c + \
-                               (min(1 - weights_new.sum(), 0)) * (1 + convert_return_period(
-                                    ret=self.__rf_d.loc[[t]],
-                                    period_d_current=1,
-                                    period_d_new=self.__frequency_to_day(freq=self.__data_frequency)
-                               ).iat[0])
-            # added risk-free lending / borrowing if totalweights differ from 1
-            # changes in compute_metrics have been reverted
+                ccy_turnover_t.sum() * self.__ccy_exchg_c + borrowing_costs
 
             weights_old = weights_new * (assets_ret_t + 1)
-            weights_old = (weights_old / weights_old.sum()) * weights_new.sum()
+            if not long_short_strat and weights_old.sum() >= 1e-2:
+                weights_old = (weights_old / weights_old.sum()) * weights_new.sum()
+
             if rolling:
                 window_start += offset
 
@@ -551,6 +562,7 @@ class BackTester:
         # RECORDING BACKTEST -------------------------------------------------------------------------------------------
         backtest_instance = self.__make_backtest_record(
             strategy=strategy,
+            long_short_strat=long_short_strat,
             rebalancing_freq=rebalancing_freq,
             gap_days=gap_days,
             constrained=constrained,
@@ -570,14 +582,12 @@ class BackTester:
         )
         # --------------------------------------------------------------------------------------------------------------
 
-        print(strat_weights)
-        print(strat_ret)
-
         return backtest_instance
 
     def __make_backtest_record(
             self,
             strategy: StrategyFunction,
+            long_short_strat: bool,
             rebalancing_freq: str | int,
             gap_days: int,
             constrained: bool,
@@ -597,7 +607,8 @@ class BackTester:
     ) -> 'BackTestRec':
 
         avg_excess_return, avg_vol, avg_semi_vol, sharpe_ratio, max_drawdown, skewness, kurt = self.__compute_metrics(
-            returns=strat_ret
+            returns=strat_ret,
+            long_short_strat=long_short_strat,
         )
 
         bt_rec = BackTestRec(

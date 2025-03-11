@@ -49,6 +49,7 @@ class DataAnalyser:
             y_direct: pd.Series | None = None,
             x_operation: Callable[[pd.DataFrame], pd.DataFrame] = lambda df: df,
             y_operation: Callable[[pd.Series], pd.Series] = lambda s: s,
+            constant_term: bool = True,
             show_regression_plot: bool = False,
             save_regression_plot: bool = False,
             fill_nan: float | None = None,
@@ -87,19 +88,22 @@ class DataAnalyser:
                 .squeeze()
             )
 
-        if any([y_direct is None, x_direct is None]):
-            X_freq = X.index.to_series().diff().median()
-            y_freq = y.index.to_series().diff().median()
-            index_start = min(X.index[0], y.index[0])
-            index_end = max(X.index[-1], y.index[-1])
-            if X_freq < y_freq:
-                y = y.reindex(X.index, method="nearest")
-                X = X.loc[index_start:index_end]
-            else:
-                X = X.reindex(y.index, method="nearest")
-                y = y[index_start:index_end]
+        X_freq = X.index.to_series().diff().median()
+        y_freq = y.index.to_series().diff().median()
+        index_start = max(X.index[0], y.index[0])
+        index_end = min(X.index[-1], y.index[-1])
+        if X_freq < y_freq:
+            y = y.reindex(X.index, method="nearest")
+        else:
+            X = X.reindex(y.index, method="nearest")
 
-        X = sm.add_constant(X)
+        y = y[index_start:index_end]
+        X = X.loc[index_start:index_end]
+
+        print(X)
+
+        if constant_term:
+            X = sm.add_constant(X)
 
         model = sm.OLS(y, X).fit()
         print("\n")
@@ -107,17 +111,21 @@ class DataAnalyser:
         print("\n")
 
         if show_regression_plot or save_regression_plot:
-            num_vars = X.shape[1] - 1
+            num_vars = X.shape[1] - (1 if constant_term else 0)
             fig, axes = plt.subplots(nrows=num_vars, ncols=1, figsize=(6, 4 * num_vars))
 
             if num_vars == 1:
                 axes = [axes]
 
             for i, ax, in enumerate(axes):
-                X_var = X.iloc[:, i + 1]
+                X_var = X.iloc[:, i + 1] if constant_term else X.iloc[:, i]
                 X_range = pd.Series(np.linspace(X_var.min(), X_var.max(), 100))
-                beta_0 = model.params[0]
-                beta_i = model.params[i + 1]
+                if constant_term:
+                    beta_0 = model.params[0]
+                    beta_i = model.params[i + 1]
+                else:
+                    beta_0 = 0
+                    beta_i = model.params[i]
                 y_regression = beta_0 + beta_i * X_range
 
                 ax.scatter(X_var, y, alpha=0.5, label="Actual Data")
@@ -128,18 +136,20 @@ class DataAnalyser:
 
             plt.tight_layout()
 
-            if show_regression_plot:
-                plt.show()
-
             if save_regression_plot:
                 plt.savefig(
                     os.path.join(
                         Path.PLOT_PATH,
-                        f"REG-{y_asset_name}<>{'_'.join(x_asset_names)}-{datetime.now().strftime('%Y-%m-%d-%H-%M')}.png"
+                        f"REG-{y_asset_name}<>"
+                        f"{'_'.join(x_asset_names if x_asset_names else x_direct.columns)}-"
+                        f"{datetime.now().strftime('%Y-%m-%d-%H-%M')}.png"
                     ),
                     dpi=300,
                     bbox_inches="tight"
                 )
+
+            if show_regression_plot:
+                plt.show()
 
     def analyse_return_distribution(
             self,
@@ -173,6 +183,8 @@ class DataAnalyser:
         print(tabulate(stats_data, headers=headers, tablefmt="fancy_grid", floatfmt=".4f"))
         print("\n")
 
+        plt.figure(figsize=(6, 4))
+
         if show_distribution_plot or save_distribution_plot:
             for i, column in enumerate(df.columns):
                 sns.kdeplot(
@@ -187,9 +199,6 @@ class DataAnalyser:
             plt.legend()
             plt.title(f"Distribution of Returns")
 
-            if show_distribution_plot:
-                plt.show()
-
             if save_distribution_plot:
                 plt.savefig(
                     os.path.join(
@@ -200,49 +209,60 @@ class DataAnalyser:
                     bbox_inches="tight"
                 )
 
+            if show_distribution_plot:
+                plt.show()
+
     def single_plot(
             self,
-            x_series: pd.Series,
             y_series: pd.Series,
+            x_series: pd.Series | None = None,
             scatter_plot: bool = False,
             line_plot: bool = False,
             save_plot: bool = False
     ):
-        df = concat_df_series_with_nearest_index(df_lst=[x_series, y_series])
+        y_series = y_series.squeeze()
+        if x_series is not None:
+            x_series = x_series.squeeze()
+            df = concat_df_series_with_nearest_index(df_lst=[x_series, y_series])
+            x_name = str(x_series.columns[0]) if isinstance(x_series, pd.DataFrame) else str(x_series.name)
+        y_name = str(y_series.columns[0]) if isinstance(y_series, pd.DataFrame) else str(y_series.name)
         plt.figure(figsize=(6, 4))
+
         if scatter_plot and line_plot:
             raise Warning("Plot must be either of type scatter or line not both")
         elif scatter_plot:
             plt.scatter(
-                df[str(x_series.columns[0]) if isinstance(x_series, pd.DataFrame) else str(x_series.name)],
-                df[str(y_series.columns[0]) if isinstance(y_series, pd.DataFrame) else str(y_series.name)],
+                df[x_name] if x_series is not None else y_series.index,
+                df[y_name] if x_series is not None else y_series,
                 label="Data",
                 alpha=0.7
             )
         elif line_plot:
             plt.plot(
-                df[str(x_series.columns[0]) if isinstance(x_series, pd.DataFrame) else str(x_series.name)],
-                df[str(y_series.columns[0]) if isinstance(y_series, pd.DataFrame) else str(y_series.name)],
-                color=self.__plot_colors[0],
+                df[x_name] if x_series is not None else y_series.index,
+                df[y_name] if x_series is not None else y_series,
+                color=self.__plot_colors[1],
             )
         else:
             raise Warning("Please provide a plot type: plot | line")
 
         plt.xlabel("X-axis")
         plt.ylabel("Y-axis")
-        plt.title(
-            f"{str(x_series.columns[0]) if isinstance(x_series, pd.DataFrame) else str(x_series.name)} vs "
-            f"{str(y_series.columns[0]) if isinstance(y_series, pd.DataFrame) else str(y_series.name)}"
-        )
-        plt.legend()
-        plt.show()
+        #plt.title(
+        #    f"{x_name if x_series is not None else 'Date'} vs "
+        #    f"{y_name}"
+        #)
+        #plt.legend()
 
         if save_plot:
             plt.savefig(
                 os.path.join(
                     Path.PLOT_PATH,
-                    f"SIMPLE_PLOT-{y_series.name}<>{x_series.name}-{datetime.now().strftime('%Y-%m-%d-%H-%M')}.png",
+                    f"SIMPLE_PLOT-{y_series.name}<>{x_series.name if x_series is not None else 'Date'}-"
+                    f"{datetime.now().strftime('%Y-%m-%d-%H-%M')}.png",
                 ),
                 dpi=300,
                 bbox_inches="tight"
             )
+
+        plt.show()
